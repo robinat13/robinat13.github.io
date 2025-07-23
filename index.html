@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voter List Analysis Tool</title>
+
+    <!-- 1. STYLES AND LIBRARIES -->
+    <!-- Bootstrap CSS for styling -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- DataTables CSS for interactive tables -->
+    <link href="https://cdn.datatables.net/1.13.7/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- PWA Manifest and Themeing -->
+    <meta name="theme-color" content="#0d6efd"/>
+    <link rel="apple-touch-icon" href="https://placehold.co/192x192/0d6efd/ffffff?text=V">
+    <!-- The manifest link is injected dynamically by the script below -->
+
+    <style>
+        body { 
+            padding: 2rem; 
+            background-color: #f8f9fa; 
+            font-family: 'Inter', sans-serif;
+        }
+        .container { 
+            max-width: 1600px; 
+            margin: auto;
+        }
+        .card {
+            border: none;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .btn {
+             border-radius: 0.5rem;
+             font-weight: 500;
+        }
+        #voteCounts { 
+            font-size: 1.1rem; 
+        }
+        table.dataTable th, table.dataTable td { 
+            white-space: nowrap; 
+            vertical-align: middle;
+        }
+        .family-group { 
+            margin-bottom: 1.5rem; 
+            border: 1px solid #dee2e6; 
+            border-radius: .75rem; 
+            padding: 1.5rem; 
+            background-color: #fff;
+        }
+        .form-check-input {
+            width: 1.5em;
+            height: 1.5em;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header class="text-center mb-5">
+            <h1 class="display-5 fw-bold">📊 Voter List Analysis Tool</h1>
+            <p class="lead text-muted">Enter candidate names or import a saved file to begin.</p>
+        </header>
+
+        <!-- SETUP SECTION -->
+        <div id="setupSection" class="card p-4 mb-5">
+            <div class="row g-3 align-items-center">
+                <div class="col-md-12"><p class="fw-bold">Option 1: Start a New Session</p></div>
+                <div class="col-md-8">
+                    <input type="text" class="form-control form-control-lg" id="candidateNames" placeholder="Enter Candidate Names, comma-separated">
+                </div>
+                <div class="col-md-4 d-grid">
+                     <button id="loadDataBtn" class="btn btn-primary btn-lg">Load Voter Data</button>
+                </div>
+                <div class="col-12"><hr></div>
+                <div class="col-md-12">
+                    <p class="fw-bold">Option 2: Load a Saved Session</p>
+                    <label class="btn btn-warning btn-lg w-100">
+                        Import from JSON File
+                        <input type="file" id="importFile" accept=".json" class="d-none">
+                    </label>
+                </div>
+            </div>
+        </div>
+        
+        <!-- MAIN APP SECTION (hidden initially) -->
+        <div id="app" class="d-none">
+            <!-- CONTROLS & COUNTS -->
+            <div class="card p-4 mb-4">
+                <div class="row align-items-center">
+                    <div class="col-lg-6 mb-3 mb-lg-0">
+                        <h3 class="mb-3">Vote Counts</h3>
+                        <div id="voteCounts" class="d-flex flex-wrap gap-3"></div>
+                    </div>
+                    <div class="col-lg-6 text-lg-end">
+                        <div class="btn-group me-2 mb-2 mb-md-0" role="group">
+                            <button id="showTableBtn" class="btn btn-outline-secondary d-none">Full Table View</button>
+                            <button id="groupByFamilyBtn" class="btn btn-outline-secondary">Group by Family</button>
+                        </div>
+                        <div class="btn-group mb-2 mb-md-0" role="group">
+                            <button id="exportBtn" class="btn btn-success">Export Session</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CHART -->
+            <div class="card p-4 mb-4">
+                 <canvas id="voteChart"></canvas>
+            </div>
+
+            <!-- DATA TABLE / FAMILY GROUPING -->
+            <div id="tableView" class="card p-4">
+                <h3 class="mb-3">Interactive Voter List</h3>
+                <div class="table-responsive">
+                    <table id="voterTable" class="table table-striped table-hover" style="width:100%"></table>
+                </div>
+            </div>
+            <div id="familyView" class="d-none mt-4">
+                 <h3 class="mb-3">Family Groups</h3>
+                 <div id="familyContainer"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. SCRIPT LIBRARIES -->
+    <!-- jQuery (required by DataTables) -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <!-- DataTables JS -->
+    <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.7/js/dataTables.bootstrap5.min.js"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- 3. APPLICATION LOGIC -->
+    <script type="module">
+        // --- Hardcoded Voter Data ---
+        // This data was extracted from the provided PDF and includes English transliterations.
+        const HARDCODED_VOTER_DATA = [
+            { serial: '61', name: 'तुलसी देवी (Tulsi Devi)', guardian: 'मुकेश सिंह (Mukesh Singh)' },
+            { serial: '62', name: 'रविंद्र सिंह (Ravindra Singh)', guardian: 'पदम् सिंह (Padam Singh)' },
+            { serial: '63', name: 'सुलोचना देवी (Sulochana Devi)', guardian: 'रविंद्र सिंह (Ravindra Singh)' },
+            { serial: '64', name: 'वीरेंद्र सिंह (Virendra Singh)', guardian: 'पदम् सिंह (Padam Singh)' },
+            { serial: '65', name: 'दीपा देवी (Deepa Devi)', guardian: 'वीरेंद्र सिंह (Virendra Singh)' },
+            { serial: '66', name: 'सूरज सिंह (Suraj Singh)', guardian: 'वीरेंद्र सिंह (Virendra Singh)' },
+            { serial: '67', name: 'प्रियंका देवी (Priyanka Devi)', guardian: 'सूरज सिंह (Suraj Singh)' },
+            { serial: '68', name: 'कृष्णा चौहान (Krishna Chauhan)', guardian: 'वीरेंद्र सिंह (Virendra Singh)' },
+            { serial: '69', name: 'मंजू देवी (Manju Devi)', guardian: 'वीरेंद्र सिंह (Virendra Singh)' },
+            { serial: '70', name: 'अमृता (Amrita)', guardian: 'त्रिलोक सिंह (Trilok Singh)' },
+            { serial: '71', name: 'लक्ष्मण सिंह (Laxman Singh)', guardian: 'नरेंद्र सिंह (Narendra Singh)' },
+            { serial: '72', name: 'यशोदा देवी (Yashoda Devi)', guardian: 'लक्ष्मण सिंह (Laxman Singh)' },
+            { serial: '73', name: 'सारिका (Sarika)', guardian: 'लक्ष्मण सिंह (Laxman Singh)' },
+            { serial: '74', name: 'निधि (Nidhi)', guardian: 'लक्ष्मण सिंह (Laxman Singh)' },
+            { serial: '75', name: 'आदर्श सिंह (Adarsh Singh)', guardian: 'नंदा सिंह (Nanda Singh)' },
+            { serial: '76', name: 'आनंद सिंह (Anand Singh)', guardian: 'नंदा सिंह (Nanda Singh)' },
+            { serial: '77', name: 'रंजना देवी (Ranjana Devi)', guardian: 'आनंद सिंह (Anand Singh)' },
+            { serial: '78', name: 'सौरभ चौहान (Saurabh Chauhan)', guardian: 'आनंद सिंह (Anand Singh)' },
+            { serial: '79', name: 'गौरभ चौहान (Gaurabh Chauhan)', guardian: 'आनंद सिंह (Anand Singh)' },
+            { serial: '80', name: 'पृथ्वी सिंह (Prithvi Singh)', guardian: 'हुकम सिंह (Hukam Singh)' },
+            { serial: '81', name: 'माहेश्वरी देवी (Maheshwari Devi)', guardian: 'पृथ्वी सिंह (Prithvi Singh)' },
+            { serial: '82', name: 'भूपेंद्र सिंह (Bhupendra Singh)', guardian: 'पृथ्वी सिंह (Prithvi Singh)' },
+            { serial: '83', name: 'प्रियंका देवी (Priyanka Devi)', guardian: 'भूपेंद्र सिंह (Bhupendra Singh)' },
+            { serial: '84', name: 'शिवचरण सिंह (Shivcharan Singh)', guardian: 'हरेंद्र सिंह (Harendra Singh)' },
+            { serial: '85', name: 'कुसुम देवी (Kusum Devi)', guardian: 'शिवचरण सिंह (Shivcharan Singh)' },
+            { serial: '86', name: 'कौश्तुभ (Kaushtubh)', guardian: 'शिवचरण सिंह (Shivcharan Singh)' },
+            { serial: '87', name: 'प्रेरणा (Prerna)', guardian: 'शिवचरण सिंह (Shivcharan Singh)' },
+            { serial: '88', name: 'सौमी (Saumi)', guardian: 'पुष्कर सिंह (Pushkar Singh)' },
+            { serial: '89', name: 'कृष्णा चौहान (Krishna Chauhan)', guardian: 'पुष्कर सिंह (Pushkar Singh)' },
+            { serial: '90', name: 'ज्योति देवी (Jyoti Devi)', guardian: 'कृष्णा चौहान (Krishna Chauhan)' },
+            { serial: '31', name: 'अक्षय चौहान (Akshay Chauhan)', guardian: 'सतीश सिंह (Satish Singh)' },
+            { serial: '32', name: 'अभय चौहान (Abhay Chauhan)', guardian: 'सतीश सिंह (Satish Singh)' },
+            { serial: '33', name: 'मखुली देवी (Makhuli Devi)', guardian: 'अवतार सिंह (Avatar Singh)' },
+            { serial: '34', name: 'रघुवीर सिंह (Raghuvir Singh)', guardian: 'अवतार सिंह (Avatar Singh)' },
+            { serial: '35', name: 'विजया देवी (Vijaya Devi)', guardian: 'रघुवीर सिंह (Raghuvir Singh)' },
+            { serial: '36', name: 'सूरज चौहान (Suraj Chauhan)', guardian: 'रघुवीर सिंह (Raghuvir Singh)' },
+            { serial: '37', name: 'पूजा चौहान (Pooja Chauhan)', guardian: 'सूरज चौहान (Suraj Chauhan)' },
+            { serial: '38', name: 'चमेली देवी (Chameli Devi)', guardian: 'शंकर सिंह (Shankar Singh)' },
+            { serial: '39', name: 'रेखा देवी (Rekha Devi)', guardian: 'शंकर सिंह (Shankar Singh)' },
+            { serial: '40', name: 'सृष्टि (Srishti)', guardian: 'शंकर सिंह (Shankar Singh)' },
+            { serial: '41', name: 'विशाल (Vishal)', guardian: 'शंकर सिंह (Shankar Singh)' },
+            { serial: '42', name: 'आयुष्मान (Ayushman)', guardian: 'पूर्ण सिंह (Purna Singh)' },
+            { serial: '43', name: 'जयदीप सिंह (Jaideep Singh)', guardian: 'पूर्ण सिंह (Purna Singh)' },
+            { serial: '44', name: 'प्रियंका देवी (Priyanka Devi)', guardian: 'जयदीप सिंह (Jaideep Singh)' },
+            { serial: '45', name: 'रजनी देवी (Rajni Devi)', guardian: 'दिगम्बर सिंह (Digambar Singh)' },
+            { serial: '46', name: 'अखिलेश सिंह (Akhilesh Singh)', guardian: 'दिगम्बर सिंह (Digambar Singh)' },
+            { serial: '47', name: 'प्रतिभा (Pratibha)', guardian: 'दिगम्बर सिंह (Digambar Singh)' },
+            { serial: '48', name: 'प्रेम सिंह (Prem Singh)', guardian: 'पुष्कर सिंह (Pushkar Singh)' },
+            { serial: '49', name: 'सीमा देवी (Seema Devi)', guardian: 'प्रेम सिंह (Prem Singh)' },
+            { serial: '50', name: 'सागर चौहान (Sagar Chauhan)', guardian: 'प्रेम सिंह (Prem Singh)' },
+            { serial: '51', name: 'जानकी देवी (Janki Devi)', guardian: 'पुष्कर सिंह (Pushkar Singh)' },
+            { serial: '52', name: 'आशुतोष सिंह (Ashutosh Singh)', guardian: 'तारा सिंह (Tara Singh)' },
+            { serial: '53', name: 'भालमती देवी (Bhalmati Devi)', guardian: 'आशुतोष सिंह (Ashutosh Singh)' },
+            { serial: '54', name: 'नरेश सिंह (Naresh Singh)', guardian: 'आशुतोष सिंह (Ashutosh Singh)' },
+            { serial: '55', name: 'बविता देवी (Babita Devi)', guardian: 'नरेश सिंह (Naresh Singh)' },
+            { serial: '56', name: 'दिनेश सिंह (Dinesh Singh)', guardian: 'आशुतोष सिंह (Ashutosh Singh)' },
+            { serial: '57', name: 'मनोरमा देवी (Manorama Devi)', guardian: 'दिनेश सिंह (Dinesh Singh)' },
+            { serial: '58', name: 'अमीषा (Amisha)', guardian: 'दिनेश सिंह (Dinesh Singh)' },
+            { serial: '59', name: 'निखिल चौहान (Nikhil Chauhan)', guardian: 'दिनेश सिंह (Dinesh Singh)' },
+            { serial: '60', name: 'मुकेश सिंह (Mukesh Singh)', guardian: 'आशुतोष सिंह (Ashutosh Singh)' },
+            { serial: '361', name: 'मनीष चौहान (Manish Chauhan)', guardian: 'कुशल सिंह (Kushal Singh)' },
+            { serial: '362', name: 'मोहित चौहान (Mohit Chauhan)', guardian: 'कुशल सिंह (Kushal Singh)' },
+            { serial: '331', name: 'देवेश्वरी देवी (Deveshwari Devi)', guardian: 'भागवत सिंह (Bhagwat Singh)' },
+            { serial: '332', name: 'राजेश सिंह (Rajesh Singh)', guardian: 'भागवत सिंह (Bhagwat Singh)' },
+            { serial: '333', name: 'रश्मि देवी (Rashmi Devi)', guardian: 'राजेश सिंह (Rajesh Singh)' },
+            { serial: '334', name: 'कुलदीप सिंह (Kuldeep Singh)', guardian: 'भागवत सिंह (Bhagwat Singh)' },
+            { serial: '335', name: 'प्रियंका देवी (Priyanka Devi)', guardian: 'कुलदीप सिंह (Kuldeep Singh)' },
+            { serial: '336', name: 'विमलेश सिंह (Vimlesh Singh)', guardian: 'हरेंद्र सिंह (Harendra Singh)' },
+            { serial: '337', name: 'अंकिता देवी (Ankita Devi)', guardian: 'विमलेश सिंह (Vimlesh Singh)' },
+            { serial: '338', name: 'फागुनी देवी (Faguni Devi)', guardian: 'हरेंद्र सिंह (Harendra Singh)' },
+            { serial: '339', name: 'धीरेन्द्र सिंह (Dheerendra Singh)', guardian: 'विशन सिंह (Vishan Singh)' },
+            { serial: '340', name: 'ललिता देवी (Lalita Devi)', guardian: 'धीरेन्द्र सिंह (Dheerendra Singh)' },
+            { serial: '341', name: 'नयन सिंह (Nayan Singh)', guardian: 'धीरेन्द्र सिंह (Dheerendra Singh)' },
+            { serial: '342', name: 'मयंक सिंह (Mayank Singh)', guardian: 'धीरेन्द्र सिंह (Dheerendra Singh)' },
+            { serial: '343', name: 'बलवंत सिंह (Balwant Singh)', guardian: 'इंद्र सिंह (Indra Singh)' },
+            { serial: '344', name: 'दुर्गी देवी (Durga Devi)', guardian: 'बलवंत सिंह (Balwant Singh)' },
+            { serial: '345', name: 'ईश्वर सिंह (Ishwar Singh)', guardian: 'बलवंत सिंह (Balwant Singh)' },
+            { serial: '346', name: 'इंदू देवी (Indu Devi)', guardian: 'ईश्वर सिंह (Ishwar Singh)' },
+            { serial: '347', name: 'विक्रम सिंह (Vikram Singh)', guardian: 'जालम सिंह (Jalam Singh)' },
+            { serial: '348', name: 'सरोजनी देवी (Sarojini Devi)', guardian: 'विक्रम सिंह (Vikram Singh)' },
+            { serial: '349', name: 'प्रभात सिंह (Prabhat Singh)', guardian: 'विक्रम सिंह (Vikram Singh)' },
+            { serial: '350', name: 'विशाल चौहान (Vishal Chauhan)', guardian: 'विक्रम सिंह (Vikram Singh)' },
+            { serial: '351', name: 'सुरेंद्र सिंह (Surendra Singh)', guardian: 'जालम सिंह (Jalam Singh)' },
+            { serial: '352', name: 'बबीता देवी (Babita Devi)', guardian: 'सुरेंद्र सिंह (Surendra Singh)' },
+            { serial: '353', name: 'सुमित सिंह (Sumit Singh)', guardian: 'सुरेंद्र सिंह (Surendra Singh)' },
+            { serial: '354', name: 'साक्षी (Sakshi)', guardian: 'सुमित सिंह (Sumit Singh)' },
+            { serial: '355', name: 'विनीत (Vinit)', guardian: 'सुरेंद्र सिंह (Surendra Singh)' },
+            { serial: '356', name: 'आकाश चौहान (Akash Chauhan)', guardian: 'सुरेंद्र सिंह (Surendra Singh)' },
+            { serial: '357', name: 'विकास चौहान (Vikas Chauhan)', guardian: 'सुरेंद्र सिंह (Surendra Singh)' },
+            { serial: '358', name: 'सचिन चौहान (Sachin Chauhan)', guardian: 'सुरेंद्र सिंह (Surendra Singh)' },
+            { serial: '359', name: 'कुशल सिंह (Kushal Singh)', guardian: 'पूरन सिंह (Pooran Singh)' },
+            { serial: '360', name: 'अंजू देवी (Anju Devi)', guardian: 'कुशल सिंह (Kushal Singh)' },
+            { serial: '301', name: 'लच्छी देवी (Lachhi Devi)', guardian: 'उमेश सिंह (Umesh Singh)' },
+            { serial: '302', name: 'रमेश सिंह (Ramesh Singh)', guardian: 'हितेंद्र सिंह (Hitendra Singh)' },
+            { serial: '303', name: 'रेखा देवी (Rekha Devi)', guardian: 'रमेश सिंह (Ramesh Singh)' },
+            { serial: '304', name: 'कमला देवी (Kamla Devi)', guardian: 'हितेंद्र सिंह (Hitendra Singh)' },
+            { serial: '305', name: 'किशोर सिंद्र (Kishor Sindra)', guardian: 'कुंवर सिंह (Kunwar Singh)' },
+            { serial: '306', name: 'कविता देवी (Kavita Devi)', guardian: 'किशोर सिंह (Kishor Singh)' },
+            { serial: '307', name: 'योगेश (Yogesh)', guardian: 'कुंवर सिंह (Kunwar Singh)' },
+            { serial: '308', name: 'रामचंद्र सिंह (Ramchandra Singh)', guardian: 'मुरली सिंह (Murli Singh)' },
+            { serial: '309', name: 'सुमेर सिंह (Sumer Singh)', guardian: 'रामचंद्र सिंह (Ramchandra Singh)' },
+            { serial: '310', name: 'अनीता देवी (Anita Devi)', guardian: 'सुमेर सिंह (Sumer Singh)' },
+            { serial: '311', name: 'प्रवेंद्र सिंह (Pravendra Singh)', guardian: 'वल्लभ सिंह (Vallabh Singh)' },
+            { serial: '312', name: 'पूजा देवी (Pooja Devi)', guardian: 'प्रवेंद्र सिंह (Pravendra Singh)' },
+            { serial: '313', name: 'गोदांबरी देवी (Godambari Devi)', guardian: 'वल्लभ सिंह (Vallabh Singh)' },
+            { serial: '314', name: 'कुंदन सिंह (Kundan Singh)', guardian: 'किशन सिंह (Kishan Singh)' },
+            { serial: '315', name: 'पुष्पा देवी (Pushpa Devi)', guardian: 'कुंदन सिंह (Kundan Singh)' },
+            { serial: '316', name: 'मुकेश सिंह (Mukesh Singh)', guardian: 'कुंदन सिंह (Kundan Singh)' },
+            { serial: '317', name: 'तनुजा (Tanuja)', guardian: 'मुकेश सिंह (Mukesh Singh)' },
+            { serial: '318', name: 'रुपेश चौहान (Rupesh Chauhan)', guardian: 'कुंदन सिंह (Kundan Singh)' },
+            { serial: '319', name: 'प्रताप सिंह (Pratap Singh)', guardian: 'जालम सिंह (Jalam Singh)' },
+            { serial: '320', name: 'मधु देवी (Madhu Devi)', guardian: 'प्रताप सिंह (Pratap Singh)' },
+            { serial: '321', name: 'अमित चौहान (Amit Chauhan)', guardian: 'प्रताप सिंह (Pratap Singh)' },
+            { serial: '322', name: 'आकांक्षा चौहान (Akanksha Chauhan)', guardian: 'अमित चौहान (Amit Chauhan)' },
+            { serial: '323', name: 'अजय चौहान (Ajay Chauhan)', guardian: 'प्रताप सिंह (Pratap Singh)' },
+            { serial: '324', name: 'नंदा देवी (Nanda Devi)', guardian: 'जालम सिंह (Jalam Singh)' },
+            { serial: '325', name: 'संजय गुसाई (Sanjay Gusai)', guardian: 'बख्तावर सिंह (Bakhtawar Singh)' },
+            { serial: '326', name: 'सुनील थपलियाल (Sunil Thapliyal)', guardian: 'कली राम (Kali Ram)' },
+            { serial: '327', name: 'अमित केवट (Amit Kewat)', guardian: 'विजय केवट (Vijay Kewat)' },
+            { serial: '328', name: 'प्रिन्सी कुमार (Princy Kumar)', guardian: 'जयंत (Jayant)' },
+            { serial: '329', name: 'शुद्धात्मानन्द (Shuddhatmanand)', guardian: 'विनायका नंद (Vinayaka Nand)' },
+            { serial: '330', name: 'भागवत सिंह (Bhagwat Singh)', guardian: 'सोबन सिंह (Soban Singh)' },
+            { serial: '271', name: 'अभिजीत सिंह (Abhijeet Singh)', guardian: 'दरवान सिंह (Darwan Singh)' },
+            { serial: '272', name: 'आर्क सिंह (Ark Singh)', guardian: 'दरवान सिंह (Darwan Singh)' },
+            { serial: '273', name: 'सुधीर सिंह (Sudhir Singh)', guardian: 'अजव सिंह (Ajav Singh)' },
+            { serial: '274', name: 'मंजू देवी (Manju Devi)', guardian: 'सुधीर सिंह (Sudhir Singh)' },
+            { serial: '275', name: 'रोहित चौहान (Rohit Chauhan)', guardian: 'सुधीर सिंह (Sudhir Singh)' },
+            { serial: '276', name: 'कृष्णा चौहान (Krishna Chauhan)', guardian: 'सुधीर सिंह (Sudhir Singh)' },
+            { serial: '277', name: 'श्रेया चौहान (Shreya Chauhan)', guardian: 'रोहित चौहान (Rohit Chauhan)' },
+            { serial: '278', name: 'भूपाल सिंह (Bhupal Singh)', guardian: 'इंद्र सिंह (Indra Singh)' },
+            { serial: '279', name: 'लक्ष्मी देवी (Laxmi Devi)', guardian: 'भूपाल सिंह (Bhupal Singh)' },
+            { serial: '280', name: 'रीना (Reena)', guardian: 'भूपाल सिंह (Bhupal Singh)' },
+            { serial: '281', name: 'विजय चौहान (Vijay Chauhan)', guardian: 'भूपाल सिंह (Bhupal Singh)' },
+            { serial: '282', name: 'सागर चौहान (Sagar Chauhan)', guardian: 'भूपाल सिंह (Bhupal Singh)' },
+            { serial: '283', name: 'वसावर सिंह (Vasavar Singh)', guardian: 'नंदा सिंह (Nanda Singh)' },
+            { serial: '284', name: 'अंजनी देवी (Anjani Devi)', guardian: 'वसावर सिंह (Vasavar Singh)' },
+            { serial: '285', name: 'सुशील सिंह (Sushil Singh)', guardian: 'वसावर सिंह (Vasavar Singh)' },
+            { serial: '286', name: 'एकता देवी (Ekta Devi)', guardian: 'सुशील सिंह (Sushil Singh)' },
+            { serial: '287', name: 'सुबोध सिंह (Subodh Singh)', guardian: 'वसावर सिंह (Vasavar Singh)' },
+            { serial: '288', name: 'भगत सिंह (Bhagat Singh)', guardian: 'नंदा सिंह (Nanda Singh)' },
+            { serial: '289', name: 'वसंती देवी (Vasanti Devi)', guardian: 'भगत सिंह (Bhagat Singh)' },
+            { serial: '290', name: 'चंद्रशेखर (Chandrashekhar)', guardian: 'भगत सिंह (Bhagat Singh)' },
+            { serial: '291', name: 'पल्लवी देवी (Pallavi Devi)', guardian: 'चंद्रशेखर (Chandrashekhar)' },
+            { serial: '292', name: 'देवेंद्र सिंह (Devendra Singh)', guardian: 'इंद्र सिंह (Indra Singh)' },
+            { serial: '293', name: 'पुष्पा देवी (Pushpa Devi)', guardian: 'देवेंद्र सिंह (Devendra Singh)' },
+            { serial: '294', name: 'संदेश सिंह (Sandesh Singh)', guardian: 'देवेंद्र सिंह (Devendra Singh)' },
+            { serial: '295', name: 'सोनाली (Sonali)', guardian: 'देवेंद्र सिंह (Devendra Singh)' },
+            { serial: '296', name: 'कौशल्या देवी (Kaushalya Devi)', guardian: 'इंद्र सिंह (Indra Singh)' },
+            { serial: '297', name: 'भरत सिंह (Bharat Singh)', guardian: 'बचन सिंह (Bachan Singh)' },
+            { serial: '298', name: 'शशिकला देवी (Shashikala Devi)', guardian: 'भरत सिंह (Bharat Singh)' },
+            { serial: '299', name: 'आदित्य चौहान (Aditya Chauhan)', guardian: 'भरत सिंह (Bharat Singh)' },
+            { serial: '300', name: 'उमेश सिंह (Umesh Singh)', guardian: 'हितेंद्र सिंह (Hitendra Singh)' },
+            { serial: '241', name: 'माधी देवी (Madhi Devi)', guardian: 'जयकृत सिंह (Jaikrit Singh)' },
+            { serial: '242', name: 'रमेश सिंह (Ramesh Singh)', guardian: 'नारायण सिंह (Narayan Singh)' },
+            { serial: '243', name: 'विजया चौहान (Vijaya Chauhan)', guardian: 'रमेश सिंह (Ramesh Singh)' },
+            { serial: '244', name: 'मनीष सिंह (Manish Singh)', guardian: 'रमेश सिंह (Ramesh Singh)' },
+            { serial: '245', name: 'अंजली देवी (Anjali Devi)', guardian: 'मनीष सिंह (Manish Singh)' },
+            { serial: '246', name: 'कमलेश सिंह (Kamlesh Singh)', guardian: 'जगदीश सिंह (Jagdish Singh)' },
+            { serial: '247', name: 'सरस्वती देवी (Saraswati Devi)', guardian: 'कमलेश सिंह (Kamlesh Singh)' },
+            { serial: '248', name: 'विजया देवी (Vijaya Devi)', guardian: 'जगदीश सिंह (Jagdish Singh)' },
+            { serial: '249', name: 'रामकृष्ण सिंह (Ramkrishna Singh)', guardian: 'राजेंद्र सिंह (Rajendra Singh)' },
+            { serial: '250', name: 'स्मिता (Smita)', guardian: 'रामकृष्ण सिंह (Ramkrishna Singh)' },
+            { serial: '251', name: 'ललित सिंह (Lalit Singh)', guardian: 'राजेंद्र सिंह (Rajendra Singh)' },
+            { serial: '252', name: 'कविता देवी (Kavita Devi)', guardian: 'ललित सिंह (Lalit Singh)' },
+            { serial: '253', name: 'विजेंद्र सिंह (Vijendra Singh)', guardian: 'राजेंद्र सिंह (Rajendra Singh)' },
+            { serial: '254', name: 'जयश्री (Jayashree)', guardian: 'विजेंद्र सिंह (Vijendra Singh)' },
+            { serial: '255', name: 'विकास (Vikas)', guardian: 'विजेंद्र सिंह (Vijendra Singh)' },
+            { serial: '256', name: 'विदिशा (Vidisha)', guardian: 'विजेंद्र सिंह (Vijendra Singh)' },
+            { serial: '257', name: 'संतोप सिंह (Santop Singh)', guardian: 'राजेंद्र सिंह (Rajendra Singh)' },
+            { serial: '258', name: 'शांती देवी (Shanti Devi)', guardian: 'संतोष सिंह (Santosh Singh)' },
+            { serial: '259', name: 'प्रवेंद्र सिंह (Pravendra Singh)', guardian: 'मंगल सिंह (Mangal Singh)' },
+            { serial: '260', name: 'अर्चना देवी (Archana Devi)', guardian: 'प्रवेंद्र सिंह (Pravendra Singh)' },
+            { serial: '261', name: 'जीतेन्द्र सिंह (Jitendra Singh)', guardian: 'जीतेन्द्र सिंह (Jitendra Singh)' },
+            { serial: '262', name: 'जयदीप सिंह (Jaideep Singh)', guardian: 'राकेश सिंह (Rakesh Singh)' },
+            { serial: '263', name: 'मनीषा देवी (Manisha Devi)', guardian: 'जयदीप सिंह (Jaideep Singh)' },
+            { serial: '264', name: 'राहुल सिंह (Rahul Singh)', guardian: 'राकेश सिंह (Rakesh Singh)' },
+            { serial: '265', name: 'विनीता देवी (Vinita Devi)', guardian: 'राहुल सिंह (Rahul Singh)' },
+            { serial: '266', name: 'देवेश्वरी देवी (Deveshwari Devi)', guardian: 'राकेश सिंह (Rakesh Singh)' },
+            { serial: '267', name: 'सुरजीत सिंह (Surjeet Singh)', guardian: 'जालम सिंह (Jalam Singh)' },
+            { serial: '268', name: 'शकुन् तला देवी (Shakuntala Devi)', guardian: 'सुरजीत सिह (Surjeet Singh)' },
+            { serial: '269', name: 'दरवान सिंह (Darwan Singh)', guardian: 'जालम सिंह (Jalam Singh)' },
+            { serial: '270', name: 'प्रवीणा देवी (Praveena Devi)', guardian: 'दरवान सिंह (Darwan Singh)' },
+            { serial: '234', name: 'सीमा देवी (Seema Devi)', guardian: 'अब्बल सिंह (Abbal Singh)' },
+            { serial: '211', name: 'अभिषेक सिंह (Abhishek Singh)', guardian: 'विनोद सिंह (Vinod Singh)' },
+            { serial: '212', name: 'अखिलेश चौहान (Akhilesh Chauhan)', guardian: 'विनोद सिंह (Vinod Singh)' },
+            { serial: '213', name: 'सौणी देवी (Sauni Devi)', guardian: 'दयाल सिंह (Dayal Singh)' },
+            { serial: '214', name: 'शिवराज सिंह (Shivraj Singh)', guardian: 'हरेंद्र सिंह (Harendra Singh)' },
+            { serial: '215', name: 'सम्पती देवी (Sampati Devi)', guardian: 'शिवराज सिंह (Shivraj Singh)' },
+            { serial: '216', name: 'विशोदा देवी (Vishoda Devi)', guardian: 'हरेंद्र सिंह (Harendra Singh)' },
+            { serial: '217', name: 'हीरा सिंह (Heera Singh)', guardian: 'बद्री सिंह (Badri Singh)' },
+            { serial: '218', name: 'प्रेमा देवी (Prema Devi)', guardian: 'हीरा सिंह (Heera Singh)' },
+            { serial: '219', name: 'देवेश सिंह (Devesh Singh)', guardian: 'हीरा सिंह (Heera Singh)' },
+            { serial: '220', name: 'सुमन (Suman)', guardian: 'हीरा सिंह (Heera Singh)' },
+            { serial: '221', name: 'पवन (Pawan)', guardian: 'हीरा सिंह (Heera Singh)' },
+            { serial: '222', name: 'मोती सिंह (Moti Singh)', guardian: 'बद्री सिंह (Badri Singh)' },
+            { serial: '223', name: 'हेमंती देवी (Hemanti Devi)', guardian: 'मोती सिंह (Moti Singh)' },
+            { serial: '224', name: 'करन चौहान (Karan Chauhan)', guardian: 'मोती सिंह (Moti Singh)' },
+            { serial: '225', name: 'सुलोचना देवी (Sulochana Devi)', guardian: 'बद्री सिंह (Badri Singh)' },
+            { serial: '226', name: 'तेजेन्द्र सिंह (Tejendra Singh)', guardian: 'बल्लभ सिंह (Ballabh Singh)' },
+            { serial: '227', name: 'बीना देवी (Beena Devi)', guardian: 'तेजेन्द्र सिंह (Tejendra Singh)' },
+            { serial: '228', name: 'शैलेश चौहान (Shailesh Chauhan)', guardian: 'तेजेन्द्र सिंह (Tejendra Singh)' },
+            { serial: '229', name: 'रिया (Riya)', guardian: 'तेजेन्द्र सिंह (Tejendra Singh)' },
+            { serial: '230', name: 'महेंद्र सिंह (Mahendra Singh)', guardian: 'बल्लभ सिंह (Ballabh Singh)' },
+            { serial: '231', name: 'ममता देवी (Mamta Devi)', guardian: 'महेंद्र सिंह (Mahendra Singh)' },
+            { serial: '232', name: 'नितेश सिंह (Nitesh Singh)', guardian: 'अब्बल सिंह (Abbal Singh)' },
+            { serial: '233', name: 'शिवानी देवी (Shivani Devi)', guardian: 'नितेश सिंह (Nitesh Singh)' },
+            { serial: '235', name: 'मनोज सिंह (Manoj Singh)', guardian: 'जयकृत सिंह (Jaikrit Singh)' },
+            { serial: '236', name: 'सोनी देवी (Soni Devi)', guardian: 'मनोज सिंह (Manoj Singh)' },
+            { serial: '237', name: 'ऋषभ चौहान (Rishabh Chauhan)', guardian: 'मनोज सिंह (Manoj Singh)' },
+            { serial: '238', name: 'रितेश चौहान (Ritesh Chauhan)', guardian: 'मनोज सिंह (Manoj Singh)' },
+            { serial: '239', name: 'जयदीप सिंह (Jaideep Singh)', guardian: 'जयकृत सिंह (Jaikrit Singh)' },
+            { serial: '240', name: 'अवंतिका (Avantika)', guardian: 'जयदीप सिंह (Jaideep Singh)' },
+            { serial: '181', name: 'आईना (Aaina)', guardian: 'प्रमोद सिंह (Pramod Singh)' },
+            { serial: '182', name: 'अक्षत चौहान (Akshat Chauhan)', guardian: 'प्रमोद सिंह (Pramod Singh)' },
+            { serial: '183', name: 'विजेंद्र सिंह (Vijendra Singh)', guardian: 'तारा सिंह (Tara Singh)' },
+            { serial: '184', name: 'विजया देवी (Vijaya Devi)', guardian: 'विजेंद्र सिंह (Vijendra Singh)' },
+            { serial: '185', name: 'अमन सिंह (Aman Singh)', guardian: 'विजेंद्र सिंह (Vijendra Singh)' },
+            { serial: '186', name: 'रवीना (Raveena)', guardian: 'अमन सिंह (Aman Singh)' },
+            { serial: '187', name: 'राहुल सिंह (Rahul Singh)', guardian: 'विजेंद्र सिंह (Vijendra Singh)' },
+            { serial: '188', name: 'प्रकाश सिंह (Prakash Singh)', guardian: 'तारा सिंह (Tara Singh)' },
+            { serial: '189', name: 'दीना देवी (Deena Devi)', guardian: 'प्रकाश सिंह (Prakash Singh)' },
+            { serial: '190', name: 'विपिन सिंह (Vipin Singh)', guardian: 'प्रकाश सिंह (Prakash Singh)' },
+            { serial: '191', name: 'आँचल (Anchal)', guardian: 'विपिन सिंह (Vipin Singh)' },
+            { serial: '192', name: 'लक्ष्मण सिंह (Laxman Singh)', guardian: 'संजय सिंह (Sanjay Singh)' },
+            { serial: '193', name: 'कल्पना देवी (Kalpana Devi)', guardian: 'संजय सिंह (Sanjay Singh)' },
+            { serial: '194', name: 'अंसुल रावत (Ansul Rawat)', guardian: 'संजय सिंह (Sanjay Singh)' },
+            { serial: '195', name: 'अंजली (Anjali)', guardian: 'संजय सिंह (Sanjay Singh)' },
+            { serial: '196', name: 'महेंद्र सिंह (Mahendra Singh)', guardian: 'लक्ष्मण सिंह (Laxman Singh)' },
+            { serial: '197', name: 'यशोदा देवी (Yashoda Devi)', guardian: 'महेंद्र सिंह (Mahendra Singh)' },
+            { serial: '198', name: 'खुशी (Khushi)', guardian: 'महेंद्र सिंह (Mahendra Singh)' },
+            { serial: '199', name: 'सुधांशु रावत (Sudhanshu Rawat)', guardian: 'महेंद्र सिंह (Mahendra Singh)' },
+            { serial: '200', name: 'धर्मेंद्र सिंह (Dharmendra Singh)', guardian: 'लक्ष्मण सिंह (Laxman Singh)' },
+            { serial: '201', name: 'सुनीता देवी (Sunita Devi)', guardian: 'धर्मेंद्र सिंह (Dharmendra Singh)' },
+            { serial: '202', name: 'दिनेश सिंह (Dinesh Singh)', guardian: 'उमराव सिंह (Umrao Singh)' },
+            { serial: '203', name: 'विराज देवी (Viraj Devi)', guardian: 'दिनेश सिंह (Dinesh Singh)' },
+            { serial: '204', name: 'दीपक सिंह (Deepak Singh)', guardian: 'दिनेश सिंह (Dinesh Singh)' },
+            { serial: '205', name: 'कीर्तिका (Kirtika)', guardian: 'दीपक सिंह (Deepak Singh)' },
+            { serial: '206', name: 'मनु देवी (Manu Devi)', guardian: 'रमेश सिंह (Ramesh Singh)' },
+            { serial: '207', name: 'दीक्षा (Deeksha)', guardian: 'रमेश सिंह (Ramesh Singh)' },
+            { serial: '208', name: 'प्रिया (Priya)', guardian: 'रमेश सिंह (Ramesh Singh)' },
+            { serial: '209', name: 'विनोद सिंह (Vinod Singh)', guardian: 'दयाल सिंह (Dayal Singh)' },
+            { serial: '210', name: 'जयन्ती देवी (Jayanti Devi)', guardian: 'विनोद सिंह (Vinod Singh)' },
+            { serial: '151', name: 'अर्जुन (Arjun)', guardian: 'त्रिलोक सिंह (Trilok Singh)' },
+            { serial: '152', name: 'करन (Karan)', guardian: 'त्रिलोक सिंह (Trilok Singh)' },
+            { serial: '153', name: 'पवन (Pawan)', guardian: 'त्रिलोक सिंह (Trilok Singh)' },
+            { serial: '154', name: 'सरस्वती देवी (Saraswati Devi)', guardian: 'कृपाल सिंह (Kripal Singh)' },
+            { serial: '155', name: 'वलदेव सिंह (Valdev Singh)', guardian: 'अजव सिंह (Ajav Singh)' },
+            { serial: '156', name: 'शीला देवी (Sheela Devi)', guardian: 'बलदेव सिंह (Baldev Singh)' },
+            { serial: '157', name: 'आयुष चौहान (Ayush Chauhan)', guardian: 'बलदेव सिंह (Baldev Singh)' },
+            { serial: '158', name: 'पीयूष चौहान (Piyush Chauhan)', guardian: 'बलदेव सिंह (Baldev Singh)' },
+            { serial: '159', name: 'पलक (Palak)', guardian: 'बलदेव सिंह (Baldev Singh)' },
+            { serial: '160', name: 'देवेंद्र सिंह (Devendra Singh)', guardian: 'बल्ल्भ सिंह (Ballabh Singh)' },
+            { serial: '161', name: 'राधा देवी (Radha Devi)', guardian: 'देवेंद्र सिंह (Devendra Singh)' },
+            { serial: '162', name: 'श्रीकांत चौहान (Shrikant Chauhan)', guardian: 'देवेंद्र सिंह (Devendra Singh)' },
+            { serial: '163', name: 'प्रिया चौहान (Priya Chauhan)', guardian: 'श्रीकांत चौहान (Shrikant Chauhan)' },
+            { serial: '164', name: 'मोनिका (Monika)', guardian: 'देवेंद्र सिंह (Devendra Singh)' },
+            { serial: '165', name: 'देवेंद्र सिंह (Devendra Singh)', guardian: 'मंगल सिंह (Mangal Singh)' },
+            { serial: '166', name: 'दीपक सिंह (Deepak Singh)', guardian: 'देवेंद्र सिंह (Devendra Singh)' },
+            { serial: '167', name: 'भागीरथी देवी (Bhagirathi Devi)', guardian: 'दीपक सिंह (Deepak Singh)' },
+            { serial: '168', name: 'रोहित चौहान (Rohit Chauhan)', guardian: 'दीपक सिंह (Deepak Singh)' },
+            { serial: '169', name: 'प्रिया- (Priya)', guardian: 'दीपक सिंह (Deepak Singh)' },
+            { serial: '170', name: 'धनजय सिंह (Dhananjay Singh)', guardian: 'देवेंद्र सिंह (Devendra Singh)' },
+            { serial: '171', name: 'प्रीती (Preeti)', guardian: 'धनजय सिंह (Dhananjay Singh)' },
+            { serial: '172', name: 'मोहित सिंह (Mohit Singh)', guardian: 'धनजय सिंह (Dhananjay Singh)' },
+            { serial: '173', name: 'अमित सिंह (Amit Singh)', guardian: 'धनजय सिंह (Dhananjay Singh)' },
+            { serial: '174', name: 'संजय सिंह (Sanjay Singh)', guardian: 'देवेंद्र सिंह (Devendra Singh)' },
+            { serial: '175', name: 'अनीता (Anita)', guardian: 'संजय सिंह (Sanjay Singh)' },
+            { serial: '176', name: 'सुमित सिंह (Sumit Singh)', guardian: 'संजय सिंह (Sanjay Singh)' },
+            { serial: '177', name: 'गोपाल सिंह (Gopal Singh)', guardian: 'तारा सिंह (Tara Singh)' },
+            { serial: '178', name: 'शिवी देवी (Shivi Devi)', guardian: 'गोपाल सिंह (Gopal Singh)' },
+            { serial: '179', name: 'प्रमोद सिंह (Pramod Singh)', guardian: 'गोपाल सिंह (Gopal Singh)' },
+            { serial: '180', name: 'राखी देवी (Rakhi Devi)', guardian: 'प्रमोद सिंह (Pramod Singh)' },
+            { serial: '121', name: 'फ़ते सिंह (Fateh Singh)', guardian: 'चंद्र सिंह (Chandra Singh)' },
+            { serial: '122', name: 'सुमिता देवी (Sumita Devi)', guardian: 'चंद्र सिंह (Chandra Singh)' },
+            { serial: '123', name: 'संतोष सिंह (Santosh Singh)', guardian: 'चंद्र सिंह (Chandra Singh)' },
+            { serial: '124', name: 'अंकिता चौहान (Ankita Chauhan)', guardian: 'संतोष सिंह (Santosh Singh)' },
+            { serial: '125', name: 'लक्ष्मण सिंह (Laxman Singh)', guardian: 'पूरन सिंह (Pooran Singh)' },
+            { serial: '126', name: 'इंद्रा देवी (Indra Devi)', guardian: 'पूरन सिंह (Pooran Singh)' },
+            { serial: '127', name: 'वालप सिंह (Valap Singh)', guardian: 'पूरन सिंह (Pooran Singh)' },
+            { serial: '128', name: 'पुन्नी देवी (Punni Devi)', guardian: 'वालप सिंह (Valap Singh)' },
+            { serial: '129', name: 'सरिता देवी (Sarita Devi)', guardian: 'सुखदेव सिंह (Sukhdev Singh)' },
+            { serial: '130', name: 'अर्पिता (Arpita)', guardian: 'सुखदेव सिंह (Sukhdev Singh)' },
+            { serial: '131', name: 'आस्था (Aastha)', guardian: 'सुखदेव सिंह (Sukhdev Singh)' },
+            { serial: '132', name: 'मकर सिंह (Makar Singh)', guardian: 'जालम सिंह (Jalam Singh)' },
+            { serial: '133', name: 'जयन्ती (Jayanti)', guardian: 'मकर सिंह (Makar Singh)' },
+            { serial: '134', name: 'आर्यन चौहानव (Aryan Chauhan)', guardian: 'मकर सिंह (Makar Singh)' },
+            { serial: '135', name: 'प्रकाश सिंह (Prakash Singh)', guardian: 'श्याम सिंह (Shyam Singh)' },
+            { serial: '136', name: 'सुचिता देवी (Suchita Devi)', guardian: 'प्रकाश सिंह (Prakash Singh)' },
+            { serial: '137', name: 'मुस्कान (Muskan)', guardian: 'प्रकाश सिंह (Prakash Singh)' },
+            { serial: '138', name: 'शुभम (Shubham)', guardian: 'प्रकाश सिंह (Prakash Singh)' },
+            { serial: '139', name: 'राजा (Raja)', guardian: 'प्रकाश सिंह (Prakash Singh)' },
+            { serial: '140', name: 'दिलबर सिंह (Dilbar Singh)', guardian: 'केदार सिंह (Kedar Singh)' },
+            { serial: '141', name: 'देवेश्वरी देवी (Deveshwari Devi)', guardian: 'दिलबर सिंह (Dilbar Singh)' },
+            { serial: '142', name: 'संध्या (Sandhya)', guardian: 'दिलबर सिंह (Dilbar Singh)' },
+            { serial: '143', name: 'प्रभात (Prabhat)', guardian: 'दिलबर सिंह (Dilbar Singh)' },
+            { serial: '144', name: 'विवेक (Vivek)', guardian: 'दिलबर सिंह (Dilbar Singh)' },
+            { serial: '145', name: 'कमल सिंह (Kamal Singh)', guardian: 'केदार सिंह (Kedar Singh)' },
+            { serial: '146', name: 'देवेश्वरी देवी (Deveshwari Devi)', guardian: 'कमल सिंह (Kamal Singh)' },
+            { serial: '147', name: 'विजया देवी (Vijaya Devi)', guardian: 'शिव सिंह (Shiv Singh)' },
+            { serial: '148', name: 'सुभाष चौहान (Subhash Chauhan)', guardian: 'शिव सिंह (Shiv Singh)' },
+            { serial: '149', name: 'त्रिलोक सिंह (Trilok Singh)', guardian: 'कृपाल सिंह (Kripal Singh)' },
+            { serial: '150', name: 'सुनीता देवी (Sunita Devi)', guardian: 'त्रिलोक सिंह (Trilok Singh)' },
+            { serial: '91', name: 'सिद्दार्थ चौहान (Siddharth Chauhan)', guardian: 'कन्हैया चौहान (Kanhaiya Chauhan)' },
+            { serial: '92', name: 'भवान सिंह चौहान (Bhavan Singh Chauhan)', guardian: 'हुक्म सिंह (Hukum Singh)' },
+            { serial: '93', name: 'सरला देवी (Sarla Devi)', guardian: 'भवान सिंह (Bhavan Singh)' },
+            { serial: '94', name: 'पल्लवी (Pallavi)', guardian: 'भवान सिंह (Bhavan Singh)' },
+            { serial: '95', name: 'रोबिन चौहान (Robin Chauhan)', guardian: 'भवान सिंह (Bhavan Singh)' },
+            { serial: '96', name: 'रामचंद्र सिंह (Ramchandra Singh)', guardian: 'हुकम सिंह (Hukam Singh)' },
+            { serial: '97', name: 'दिव्यांजली (Divyanjali)', guardian: 'भवान सिंह (Bhavan Singh)' },
+            { serial: '98', name: 'बलवीर सिंह (Balveer Singh)', guardian: 'बचन सिंह (Bachan Singh)' },
+            { serial: '99', name: 'आशा देवी (Asha Devi)', guardian: 'बलवीर सिंह (Balveer Singh)' },
+            { serial: '100', name: 'समीर चौहान (Sameer Chauhan)', guardian: 'बलवीर सिंह (Balveer Singh)' },
+            { serial: '101', name: 'निहारिका (Niharika)', guardian: 'बलवीर सिंह (Balveer Singh)' },
+            { serial: '102', name: 'कपिल चौहान (Kapil Chauhan)', guardian: 'वचन सिंह (Vachan Singh)' },
+            { serial: '103', name: 'प्रीती देवी (Preeti Devi)', guardian: 'कपिल चौहान (Kapil Chauhan)' },
+            { serial: '104', name: 'सुनैना देवी (Sunaina Devi)', guardian: 'वचन सिंह (Vachan Singh)' },
+            { serial: '105', name: 'गोविन्द सिंह (Govind Singh)', guardian: 'तारा सिंह (Tara Singh)' },
+            { serial: '106', name: 'सतेश्वरी देवी (Sateshwari Devi)', guardian: 'गोविन्द सिंह (Govind Singh)' },
+            { serial: '107', name: 'नवीन सिंह (Naveen Singh)', guardian: 'गोविन्द सिंह (Govind Singh)' },
+            { serial: '108', name: 'कंचन देवी (Kanchan Devi)', guardian: 'नवीन सिंह (Naveen Singh)' },
+            { serial: '109', name: 'दीपक सिंह (Deepak Singh)', guardian: 'गोविन्द सिंह (Govind Singh)' },
+            { serial: '110', name: 'भारती देवी (Bharti Devi)', guardian: 'दीपक सिंह (Deepak Singh)' },
+            { serial: '111', name: 'शार्दुल चौहान (Shardul Chauhan)', guardian: 'दीपक सिंह (Deepak Singh)' },
+            { serial: '112', name: 'शालनी (Shalini)', guardian: 'दीपक सिंह (Deepak Singh)' },
+            { serial: '113', name: 'अव्वल सिंह (Avval Singh)', guardian: 'केदार सिंह (Kedar Singh)' },
+            { serial: '114', name: 'जमुना देवी (Jamuna Devi)', guardian: 'अब्बल सिंह (Abbal Singh)' },
+            { serial: '115', name: 'विक्रांत (Vikrant)', guardian: 'अञ्चल सिंह (Anchal Singh)' },
+            { serial: '116', name: 'कंचन सिंह (Kanchan Singh)', guardian: 'चंद्र सिंह (Chandra Singh)' },
+            { serial: '117', name: 'वचुली देवी (Vachuli Devi)', guardian: 'कंचन सिंह (Kanchan Singh)' },
+            { serial: '118', name: 'सुदर्शन चौहान (Sudarshan Chauhan)', guardian: 'कंचन सिंह (Kanchan Singh)' },
+            { serial: '119', name: 'अनुष्का चौहान (Anushka Chauhan)', guardian: 'सुदर्शन चौहान (Sudarshan Chauhan)' },
+            { serial: '120', name: 'योगिता (Yogita)', guardian: 'कंचन सिंह (Kanchan Singh)' },
+            { serial: '1', name: 'हरीश सिंह (Harish Singh)', guardian: 'रघुनाथ सिंह (Raghunath Singh)' },
+            { serial: '2', name: 'मंजुला देवी (Manjula Devi)', guardian: 'हरीश सिंह (Harish Singh)' },
+            { serial: '3', name: 'मयूरी (Mayuri)', guardian: 'हरीश सिंह (Harish Singh)' },
+            { serial: '4', name: 'पायल (Payal)', guardian: 'हरीश सिंह (Harish Singh)' },
+            { serial: '5', name: 'अनमोल (Anmol)', guardian: 'हरीश सिंह (Harish Singh)' },
+            { serial: '6', name: 'जसवीर सिंह (Jasveer Singh)', guardian: 'रघुनाथ सिंह (Raghunath Singh)' },
+            { serial: '7', name: 'सीता देवी (Sita Devi)', guardian: 'जसवीर सिंह (Jasveer Singh)' },
+            { serial: '8', name: 'केशव सिंह (Keshav Singh)', guardian: 'जसवीर सिंह (Jasveer Singh)' },
+            { serial: '9', name: 'संजना (Sanjana)', guardian: 'जसवीर सिंह (Jasveer Singh)' },
+            { serial: '10', name: 'सुनेना देवी (Sunena Devi)', guardian: 'विशेश्वर सिंह (Vishweshwar Singh)' },
+            { serial: '11', 'name': 'गोविन्द सिंह (Govind Singh)', 'guardian': 'रघुनाथ सिंह (Raghunath Singh)' },
+            { serial: '12', 'name': 'जमुना देवी (Jamuna Devi)', 'guardian': 'गोविन्द सिंह (Govind Singh)' },
+            { serial: '13', 'name': 'पंकज सिंह (Pankaj Singh)', 'guardian': 'गोविन्द सिंह (Govind Singh)' },
+            { serial: '14', 'name': 'रीना देवी (Reena Devi)', 'guardian': 'पंकज सिंह (Pankaj Singh)' },
+            { serial: '15', 'name': 'जगदीश सिंह (Jagdish Singh)', 'guardian': 'आलम सिंह (Alam Singh)' },
+            { serial: '16', 'name': 'पवित्रा देवी (Pavitra Devi)', 'guardian': 'जगदीश सिंह (Jagdish Singh)' },
+            { serial: '17', 'name': 'रजनीश सिंह (Rajnish Singh)', 'guardian': 'जगदीश सिंह (Jagdish Singh)' },
+            { serial: '18', 'name': 'पूनम देवी (Poonam Devi)', 'guardian': 'रजनीश सिंह (Rajnish Singh)' },
+            { serial: '19', 'name': 'गिरीश सिंह (Girish Singh)', 'guardian': 'जगदीश सिंह (Jagdish Singh)' },
+            { serial: '20', 'name': 'शर्मिला (Sharmila)', 'guardian': 'गिरीश सिंह (Girish Singh)' },
+            { serial: '21', 'name': 'आकाश चौहान (Akash Chauhan)', 'guardian': 'गिरीश सिंह (Girish Singh)' },
+            { serial: '22', 'name': 'शिमरन (Simran)', 'guardian': 'गिरीश सिंह (Girish Singh)' },
+            { serial: '23', 'name': 'अंजली (Anjali)', 'guardian': 'गिरीश सिंह (Girish Singh)' },
+            { serial: '24', 'name': 'आशीष सिंह (Ashish Singh)', 'guardian': 'जगदीश सिंह (Jagdish Singh)' },
+            { serial: '25', 'name': 'पूनम देवी (Poonam Devi)', 'guardian': 'आशीष सिंह (Ashish Singh)' },
+            { serial: '26', 'name': 'संजय सिंह (Sanjay Singh)', 'guardian': 'गोविन्द सिंह (Govind Singh)' },
+            { serial: '27', 'name': 'नीता देवी (Neeta Devi)', 'guardian': 'संजय सिंह (Sanjay Singh)' },
+            { serial: '28', 'name': 'रुद्रेश (Rudresh)', 'guardian': 'संजय सिंह (Sanjay Singh)' },
+            { serial: '29', 'name': 'सतीश सिंह (Satish Singh)', 'guardian': 'अवतार सिंह (Avatar Singh)' },
+            { serial: '30', 'name': 'सीमा देवी (Seema Devi)', 'guardian': 'सतीश सिंह (Satish Singh)' }
+        ];
+
+        // --- Global State ---
+        let voterData = [];
+        let candidates = [];
+        let dataTable = null;
+        let voteChart = null;
+
+        // --- DOM Element Cache ---
+        const DOMElements = {
+            setupSection: document.getElementById('setupSection'),
+            loadDataBtn: document.getElementById('loadDataBtn'),
+            candidateInput: document.getElementById('candidateNames'),
+            appSection: document.getElementById('app'),
+            voteCountsDiv: document.getElementById('voteCounts'),
+            exportBtn: document.getElementById('exportBtn'),
+            importFile: document.getElementById('importFile'),
+            groupByFamilyBtn: document.getElementById('groupByFamilyBtn'),
+            showTableBtn: document.getElementById('showTableBtn'),
+            tableView: document.getElementById('tableView'),
+            familyView: document.getElementById('familyView'),
+            familyContainer: document.getElementById('familyContainer'),
+            voterTable: document.getElementById('voterTable'),
+            voteChartCanvas: document.getElementById('voteChart'),
+        };
+
+        // --- Event Listeners ---
+        DOMElements.loadDataBtn.addEventListener('click', loadAppData);
+        DOMElements.exportBtn.addEventListener('click', exportData);
+        DOMElements.importFile.addEventListener('change', importData);
+        DOMElements.groupByFamilyBtn.addEventListener('click', renderFamilyView);
+        DOMElements.showTableBtn.addEventListener('click', renderTableView);
+
+        // --- Core Functions ---
+
+        /**
+         * Main function triggered by the 'Load Voter Data' button.
+         */
+        function loadAppData() {
+            const candidateNames = DOMElements.candidateInput.value.trim();
+
+            if (!candidateNames) {
+                alert('Please enter candidate names.');
+                return;
+            }
+
+            candidates = candidateNames.split(',').map(name => name.trim());
+            
+            // Use the hardcoded data
+            voterData = HARDCODED_VOTER_DATA.map(v => ({...v, vote: 'Not Voted' }));
+            
+            // Initialize the main application UI if it's the first run
+            if (!voteChart) {
+                initializeUI();
+            }
+            
+            renderTable();
+            updateAllCalculations();
+            
+            // Hide setup and show main app
+            DOMElements.setupSection.classList.add('d-none');
+            DOMElements.appSection.classList.remove('d-none');
+        }
+
+        /**
+         * Sets up the main application UI elements, like the Chart, for the first time.
+         */
+        function initializeUI() {
+            // Initialize Chart.js
+            const ctx = DOMElements.voteChartCanvas.getContext('2d');
+            voteChart = new Chart(ctx, {
+                type: 'bar',
+                data: { 
+                    labels: [], 
+                    datasets: [{ 
+                        label: 'Total Votes', 
+                        data: [],
+                        backgroundColor: 'rgba(0, 123, 255, 0.7)',
+                        borderColor: 'rgba(0, 123, 255, 1)',
+                        borderWidth: 1
+                    }] 
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { 
+                        legend: { display: false },
+                        title: { display: true, text: 'Candidate Vote Distribution' }
+                    },
+                    scales: { 
+                        y: { 
+                            beginAtZero: true, 
+                            ticks: { 
+                                stepSize: 1, // Ensure y-axis shows whole numbers for votes
+                                precision: 0 
+                            } 
+                        } 
+                    }
+                }
+            });
+        }
+        
+        /**
+         * Renders or re-renders the main interactive data table using DataTables.js.
+         */
+        function renderTable() {
+            // Destroy the old table instance if it exists to prevent errors
+            if (dataTable) {
+                dataTable.destroy();
+            }
+
+            // Create table headers dynamically based on candidates
+            let headerRow = '<tr><th>Serial No.</th><th>Name</th><th>Guardian Name</th>';
+            candidates.forEach(c => headerRow += `<th>${c}</th>`);
+            headerRow += '<th>None</th></tr>';
+            DOMElements.voterTable.innerHTML = `<thead>${headerRow}</thead><tbody></tbody>`;
+            
+            // Create table body content
+            const tbody = DOMElements.voterTable.querySelector('tbody');
+            let bodyHtml = '';
+            voterData.forEach((voter, index) => {
+                const radioGroupName = `vote_${voter.serial.replace(/\s/g, '_')}`;
+                let radioButtons = '';
+                
+                // Radios for candidates
+                candidates.forEach(c => {
+                    const isChecked = voter.vote === c ? 'checked' : '';
+                    radioButtons += `<td><div class="form-check d-flex justify-content-center"><input type="radio" class="form-check-input" name="${radioGroupName}" data-voter-index="${index}" value="${c}" ${isChecked}></div></td>`;
+                });
+                
+                // Radio for 'None'
+                const isNoneChecked = voter.vote === 'None' ? 'checked' : '';
+                radioButtons += `<td><div class="form-check d-flex justify-content-center"><input type="radio" class="form-check-input" name="${radioGroupName}" data-voter-index="${index}" value="None" ${isNoneChecked}></div></td>`;
+
+                bodyHtml += `<tr>
+                    <td>${voter.serial}</td>
+                    <td>${voter.name}</td>
+                    <td>${voter.guardian}</td>
+                    ${radioButtons}
+                </tr>`;
+            });
+            tbody.innerHTML = bodyHtml;
+            
+            // Initialize DataTables.js for search and sort functionality
+            dataTable = new DataTable(DOMElements.voterTable);
+
+            // Add a single, efficient event listener to the table for vote changes
+            DOMElements.voterTable.addEventListener('change', handleVoteChange);
+
+            // Ensure the correct view is visible
+            DOMElements.tableView.classList.remove('d-none');
+            DOMElements.familyView.classList.add('d-none');
+            DOMElements.groupByFamilyBtn.classList.remove('d-none');
+            DOMElements.showTableBtn.classList.add('d-none');
+        }
+
+        /**
+         * Event handler for vote changes, using event delegation.
+         */
+        function handleVoteChange(event) {
+            if (event.target.type === 'radio') {
+                const voterIndex = event.target.dataset.voterIndex;
+                const voteValue = event.target.value;
+                voterData[voterIndex].vote = voteValue;
+                updateAllCalculations(); // Update counts, chart, and local storage
+            }
+        }
+        
+        /**
+         * Central function to update vote counts, refresh the chart, and save to local storage.
+         */
+        function updateAllCalculations() {
+            // 1. Calculate vote counts
+            const counts = {};
+            candidates.forEach(c => counts[c] = 0);
+            counts['None'] = 0;
+            counts['Not Voted'] = 0;
+
+            voterData.forEach(voter => {
+                const vote = voter.vote || 'Not Voted';
+                if (counts.hasOwnProperty(vote)) {
+                    counts[vote]++;
+                }
+            });
+
+            // 2. Display counts in the UI
+            let countsHtml = '';
+            for (const [key, value] of Object.entries(counts)) {
+                const bgColor = key === 'Not Voted' ? 'bg-secondary' : 'bg-primary';
+                countsHtml += `<div class="p-2 border rounded"><strong>${key}:</strong> <span class="badge ${bgColor} rounded-pill">${value}</span></div>`;
+            }
+            DOMElements.voteCountsDiv.innerHTML = countsHtml;
+
+            // 3. Update the Chart.js data
+            voteChart.data.labels = candidates;
+            voteChart.data.datasets[0].data = candidates.map(c => counts[c] || 0);
+            voteChart.update();
+            
+            // 4. Persist the current state to browser's local storage
+            localStorage.setItem('voterAppState', JSON.stringify({voterData, candidates}));
+        }
+
+        /**
+         * Groups voters by guardian name and renders a new view.
+         */
+        function renderFamilyView() {
+            const familyGroups = voterData.reduce((acc, voter) => {
+                const key = voter.guardian;
+                if (!acc[key]) acc[key] = [];
+                acc[key].push(voter);
+                return acc;
+            }, {});
+
+            const container = DOMElements.familyContainer;
+            container.innerHTML = ''; // Clear previous view
+            
+            // Sort family groups by guardian name for consistent order
+            Object.keys(familyGroups).sort().forEach(guardianName => {
+                // Find all members of a family: the guardian and their dependents
+                const familyMembers = voterData.filter(v => v.guardian === guardianName || v.name === guardianName);
+                const uniqueFamilyMembers = Array.from(new Set(familyMembers.map(v => v.serial)))
+                                                .map(serial => familyMembers.find(v => v.serial === serial));
+
+                if (uniqueFamilyMembers.length > 1) { 
+                    let groupHtml = `<div class="family-group">
+                        <h4 class="mb-3">Family/Household of: <span class="fw-bold text-primary">${guardianName}</span> (${uniqueFamilyMembers.length} members)</h4>
+                        <ul class="list-group list-group-flush">`;
+                    
+                    uniqueFamilyMembers.forEach(voter => {
+                        groupHtml += `<li class="list-group-item d-flex justify-content-between align-items-center">
+                            <span>${voter.name} <small class="text-muted">(S/N: ${voter.serial})</small></span>
+                            <span class="badge bg-info rounded-pill">${voter.vote || 'Not Voted'}</span>
+                        </li>`;
+                    });
+                    groupHtml += '</ul></div>';
+                    container.innerHTML += groupHtml;
+                }
+            });
+
+            // Toggle view visibility
+            DOMElements.tableView.classList.add('d-none');
+            DOMElements.familyView.classList.remove('d-none');
+            DOMElements.groupByFamilyBtn.classList.add('d-none');
+            DOMElements.showTableBtn.classList.remove('d-none');
+        }
+
+        /**
+         * Switches back to the main interactive table view.
+         */
+        function renderTableView() {
+            DOMElements.tableView.classList.remove('d-none');
+            DOMElements.familyView.classList.add('d-none');
+            DOMElements.groupByFamilyBtn.classList.remove('d-none');
+            DOMElements.showTableBtn.classList.add('d-none');
+        }
+
+        // --- Data Persistence Functions ---
+
+        /**
+         * Exports the current state (voter data and candidates) to a downloadable JSON file.
+         */
+        function exportData() {
+            const dataStr = JSON.stringify({ voterData, candidates }, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(dataBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `voter_data_export_${new Date().toISOString()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        /**
+         * Imports application state from a JSON file.
+         */
+        function importData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if (data.voterData && data.candidates) {
+                        voterData = data.voterData;
+                        candidates = data.candidates;
+                        
+                        if (!voteChart) initializeUI();
+                        renderTable();
+                        updateAllCalculations();
+                        
+                        // Hide setup and show main app
+                        DOMElements.setupSection.classList.add('d-none');
+                        DOMElements.appSection.classList.remove('d-none');
+
+                        alert('Data imported successfully!');
+                    } else {
+                        alert('Invalid import file format. The file must contain "voterData" and "candidates" keys.');
+                    }
+                } catch (error) {
+                    alert('Error reading or parsing the import file.');
+                    console.error(error);
+                }
+            };
+            reader.readAsText(file);
+            event.target.value = ''; // Reset file input
+        }
+        
+        /**
+         * IIFE (Immediately Invoked Function Expression) to check for and load
+         * saved data from local storage on page load.
+         */
+        (function loadFromLocalStorage() {
+            const savedState = localStorage.getItem('voterAppState');
+            if (savedState) {
+                if (confirm("Found saved data from a previous session. Do you want to load it?")) {
+                    try {
+                        const data = JSON.parse(savedState);
+                        voterData = data.voterData;
+                        candidates = data.candidates;
+                        
+                        initializeUI();
+                        renderTable();
+                        updateAllCalculations();
+
+                        // Hide setup and show main app
+                        DOMElements.setupSection.classList.add('d-none');
+                        DOMElements.appSection.classList.remove('d-none');
+                    } catch {
+                        alert("Could not load saved data, it might be corrupted. Starting fresh.");
+                        localStorage.removeItem('voterAppState');
+                    }
+                } else {
+                    localStorage.removeItem('voterAppState');
+                }
+            }
+        })();
+
+    </script>
+
+    <!-- PWA Registration Script -->
+    <script>
+      // 1. Create and inject the manifest link
+      const manifest = {
+        "name": "Voter List Analysis Tool",
+        "short_name": "VoterTool",
+        "start_url": location.pathname,
+        "display": "standalone",
+        "background_color": "#f8f9fa",
+        "theme_color": "#0d6efd",
+        "description": "An app to analyze voter lists and track votes.",
+        "icons": [
+          {
+            "src": "https://placehold.co/192x192/0d6efd/ffffff?text=V",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+          },
+          {
+            "src": "https://placehold.co/512x512/0d6efd/ffffff?text=V",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+          }
+        ]
+      };
+      const manifestBlob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
+      const manifestURL = URL.createObjectURL(manifestBlob);
+      document.querySelector('head').insertAdjacentHTML('beforeend', `<link rel="manifest" href="${manifestURL}">`);
+
+      // 2. Define the service worker content as a string
+      const swCode = `
+        const CACHE_NAME = 'voter-tool-cache-v2'; // Incremented cache version
+        // Define the assets to be cached. The main HTML file is cached via location.href.
+        const urlsToCache = [
+          location.href,
+          'https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css',
+          'https://cdn.datatables.net/1.13.7/css/dataTables.bootstrap5.min.css',
+          'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap',
+          'https://code.jquery.com/jquery-3.7.1.min.js',
+          'https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js',
+          'https://cdn.datatables.net/1.13.7/js/dataTables.bootstrap5.min.js',
+          'https://cdn.jsdelivr.net/npm/chart.js'
+        ];
+
+        // Install event: opens a cache and adds all specified assets to it.
+        self.addEventListener('install', event => {
+          event.waitUntil(
+            caches.open(CACHE_NAME)
+              .then(cache => {
+                console.log('Opened cache');
+                // Use addAll for atomic operation, but handle potential individual failures if needed
+                return cache.addAll(urlsToCache).catch(error => {
+                    console.error('Failed to cache one or more URLs:', error);
+                });
+              })
+          );
+        });
+
+        // Fetch event: intercepts network requests and serves assets from the cache if available.
+        // If not in cache, it fetches from the network, caches the new resource, and then serves it.
+        self.addEventListener('fetch', event => {
+          event.respondWith(
+            caches.match(event.request)
+              .then(response => {
+                // Cache hit - return response
+                if (response) {
+                  return response;
+                }
+
+                // Clone the request because it's a stream and can only be consumed once.
+                const fetchRequest = event.request.clone();
+
+                return fetch(fetchRequest).then(
+                  response => {
+                    // Check if we received a valid response
+                    if(!response || response.status !== 200 || response.type !== 'basic') {
+                      return response;
+                    }
+
+                    // Clone the response because it also is a stream
+                    const responseToCache = response.clone();
+
+                    caches.open(CACHE_NAME)
+                      .then(cache => {
+                        cache.put(event.request, responseToCache);
+                      });
+
+                    return response;
+                  }
+                );
+              })
+          );
+        });
+
+        // Activate event: cleans up old caches to ensure the user has the latest version.
+        self.addEventListener('activate', event => {
+          const cacheWhitelist = [CACHE_NAME];
+          event.waitUntil(
+            caches.keys().then(cacheNames => {
+              return Promise.all(
+                cacheNames.map(cacheName => {
+                  if (cacheWhitelist.indexOf(cacheName) === -1) {
+                    console.log('Deleting old cache:', cacheName);
+                    return caches.delete(cacheName);
+                  }
+                })
+              );
+            })
+          );
+        });
+      `;
+      // Create a Blob from the service worker string
+      const swBlob = new Blob([swCode], {type: 'application/javascript'});
+      const swURL = URL.createObjectURL(swBlob);
+
+      // 3. Register the service worker
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register(swURL, { scope: '.' }) // Explicitly set scope
+            .then(registration => {
+              console.log('ServiceWorker registration successful with scope: ', registration.scope);
+            })
+            .catch(err => {
+              console.log('ServiceWorker registration failed: ', err);
+            });
+        });
+      }
+    </script>
+</body>
+</html>
