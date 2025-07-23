@@ -60,6 +60,29 @@
             height: 1.5em;
             cursor: pointer;
         }
+
+        /* Mobile optimizations for DataTables controls */
+        @media (max-width: 767px) {
+            .dataTables_wrapper .row {
+                --bs-gutter-x: 0.5rem;
+            }
+            .dt-search, .dt-length {
+                width: 100%;
+                text-align: left !important;
+                margin-bottom: 0.5rem;
+            }
+            .dt-info {
+                width: 100%;
+                text-align: center;
+                margin-bottom: 0.5rem;
+            }
+            .dt-paging {
+                width: 100%;
+            }
+            .dt-paging .pagination {
+                justify-content: center !important;
+            }
+        }
     </style>
 </head>
 <body>
@@ -124,6 +147,7 @@
             </div>
             <div id="familyView" class="d-none mt-4">
                  <h3 class="h4 mb-3">Family Groups</h3>
+                 <input type="search" id="familySearchInput" class="form-control mb-3" placeholder="Search families by name or guardian...">
                  <div id="familyContainer"></div>
             </div>
         </div>
