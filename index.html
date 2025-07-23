@@ -98,7 +98,7 @@
             <div class="row g-3">
                 <div class="col-12"><p class="fw-bold mb-1">Option 1: Start a New Session</p></div>
                 <div class="col-12">
-                    <input type="text" class="form-control form-control-lg" id="candidateNames" placeholder="Enter Candidate Names">
+                    <input type="text" class="form-control form-control-lg" id="candidateNames" placeholder="Enter Candidate Names separated by comma">
                 </div>
                 <div class="col-12 d-grid">
                      <button id="loadDataBtn" class="btn btn-primary btn-lg">Load Voter Data</button>
@@ -549,6 +549,7 @@
             familyContainer: document.getElementById('familyContainer'),
             voterTable: document.getElementById('voterTable'),
             voteChartCanvas: document.getElementById('voteChart'),
+            familySearchInput: document.getElementById('familySearchInput'),
         };
 
         // --- Event Listeners ---
@@ -557,6 +558,7 @@
         DOMElements.importFile.addEventListener('change', importData);
         DOMElements.groupByFamilyBtn.addEventListener('click', renderFamilyView);
         DOMElements.showTableBtn.addEventListener('click', renderTableView);
+        DOMElements.familySearchInput.addEventListener('input', handleFamilySearch);
 
         // --- Core Functions ---
 
@@ -779,6 +781,26 @@
             DOMElements.familyView.classList.add('d-none');
             DOMElements.groupByFamilyBtn.classList.remove('d-none');
             DOMElements.showTableBtn.classList.add('d-none');
+        }
+
+        /**
+         * Filters the family groups based on the search input.
+         */
+        function handleFamilySearch(event) {
+            const searchTerm = event.target.value.toLowerCase();
+            const familyGroups = DOMElements.familyContainer.querySelectorAll('.family-group');
+
+            familyGroups.forEach(group => {
+                const titleElement = group.querySelector('h4');
+                if (titleElement) {
+                    const titleText = titleElement.textContent.toLowerCase();
+                    if (titleText.includes(searchTerm)) {
+                        group.style.display = 'block';
+                    } else {
+                        group.style.display = 'none';
+                    }
+                }
+            });
         }
 
         // --- Data Persistence Functions ---
